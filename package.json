@@ -1,0 +1,26 @@
+{
+  "name": "publishing-playwright-framework",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "test:uat": "cross-env TEST_ENV=uat playwright test",
+    "test:uat:headed": "cross-env TEST_ENV=uat playwright test --headed",
+    "test:production": "cross-env TEST_ENV=production playwright test",
+    "test:production:headed": "cross-env TEST_ENV=production playwright test --headed",
+    "test:uat:login": "cross-env TEST_ENV=uat playwright test tests/login.spec.ts --headed",
+    "test:uat:create-magazine": "cross-env TEST_ENV=uat playwright test tests/create-magazine.spec.ts --headed",
+    "test:uat:signup": "cross-env TEST_ENV=uat playwright test tests/signup.spec.ts --headed",
+    "test:uat:backend-login": "cross-env TEST_ENV=uat playwright test tests/backend-login.spec.ts --headed",
+    "test:uat:create-job": "cross-env TEST_ENV=uat playwright test tests/create-job.spec.ts --headed",
+    "test:uat:full-flow": "cross-env TEST_ENV=uat playwright test tests/full-flow.spec.ts --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.1",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2"
+  }
+}

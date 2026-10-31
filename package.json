@@ -15,7 +15,14 @@
     "test:uat:signup": "cross-env TEST_ENV=uat playwright test tests/signup.spec.ts --headed",
     "test:uat:backend-login": "cross-env TEST_ENV=uat playwright test tests/backend-login.spec.ts --headed",
     "test:uat:create-job": "cross-env TEST_ENV=uat playwright test tests/create-job.spec.ts --headed",
-    "test:uat:full-flow": "cross-env TEST_ENV=uat playwright test tests/full-flow.spec.ts --headed"
+    "test:uat:full-flow": "cross-env TEST_ENV=uat playwright test tests/full-flow.spec.ts --headed",
+    "test:uat:existing-magazine-flow": "cross-env TEST_ENV=uat playwright test tests/existing-magazine-flow.spec.ts --headed",
+    "test:uat:backend-inventory": "cross-env TEST_ENV=uat playwright test tests/backend-create-inventory.spec.ts --headed",
+    "test:uat:backend-operator": "cross-env TEST_ENV=uat playwright test tests/backend-operator.spec.ts --headed",
+    "test:uat:backend-qc": "cross-env TEST_ENV=uat playwright test tests/backend-qc.spec.ts --headed",
+    "test:uat:backend-qa": "cross-env TEST_ENV=uat playwright test tests/backend-qa.spec.ts --headed",
+    "test:uat:backend-to-proof": "cross-env TEST_ENV=uat playwright test tests/backend-to-proof.spec.ts --headed",
+    "test:uat:full-run": "node scripts/full-run.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

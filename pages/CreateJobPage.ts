@@ -37,9 +37,12 @@ export class CreateJobPage {
         }, { timeout: 20000 });
 
         await matSelect.click({ timeout: 15000 });
-        await this.page.waitForTimeout(500);
 
+        // The select can turn enabled before the magazine list has filled in
+        // — seen on UAT as a lone "Add New Magazine +" option on an account
+        // that does have magazines. Wait for a real option before counting.
         const options = this.page.locator('mat-option');
+        await options.nth(1).waitFor({ state: 'attached', timeout: 15000 }).catch(() => {});
         const optionCount = await options.count();
         if (optionCount < 2) {
             throw new Error(

@@ -44,21 +44,31 @@ export class LoginPage {
     // full navigation timeout on each failure.
     async loginWithFallback(candidates: { username: string; password: string }[]): Promise<{ username: string; password: string }> {
         for (const cred of candidates) {
-            await this.navigate();
-            await this.page.locator(this.username).fill(cred.username);
-            await this.page.locator(this.password).fill(cred.password);
-            await this.page.getByRole('button', { name: 'Login' }).click();
+            // Confirmed live: UAT intermittently drops the first
+            // api/user/oauth-details call (net::ERR_CONNECTION_TIMED_OUT
+            // after ~20s) and the page never recovers — a fresh attempt
+            // with the same account goes straight through.
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                await this.navigate();
+                await this.page.locator(this.username).fill(cred.username);
+                await this.page.locator(this.password).fill(cred.password);
+                await this.page.getByRole('button', { name: 'Login' }).click();
 
-            const outcome = await Promise.race([
-                this.page.waitForURL('**/dashboard**', { timeout: 20000 }).then(() => 'success' as const),
-                this.page.getByText('Invalid Credentials', { exact: false }).waitFor({ state: 'visible', timeout: 20000 }).then(() => 'invalid' as const),
-            ]).catch(() => 'timeout' as const);
+                const outcome = await Promise.race([
+                    this.page.waitForURL('**/dashboard**', { timeout: 30000 }).then(() => 'success' as const),
+                    this.page.getByText('Invalid Credentials', { exact: false }).waitFor({ state: 'visible', timeout: 30000 }).then(() => 'invalid' as const),
+                ]).catch(() => 'timeout' as const);
 
-            if (outcome === 'success') {
-                console.log(`✅ Login succeeded with: ${cred.username}`);
-                return cred;
+                if (outcome === 'success') {
+                    console.log(`✅ Login succeeded with: ${cred.username}`);
+                    return cred;
+                }
+                if (outcome === 'invalid') {
+                    console.log(`⚠️  Login failed with ${cred.username} (invalid) — trying next credential set.`);
+                    break;
+                }
+                console.log(`⚠️  Login with ${cred.username} timed out (attempt ${attempt}/3)`);
             }
-            console.log(`⚠️  Login failed with ${cred.username} (${outcome}) — trying next credential set.`);
         }
         throw new Error('All candidate credentials failed to log in.');
     }

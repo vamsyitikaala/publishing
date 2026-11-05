@@ -19,7 +19,10 @@ const BACKEND_CREDENTIAL_CANDIDATES = [
     { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
 ];
 
-const ASSET_PATH = path.resolve(__dirname, '..', 'test-data', 'artists&illustrators_20260508.pdf');
+// ASSET_FILE (a file in test-data/) overrides the asset — the dual run's
+// automatic job uses a 4-page cut of this PDF so its conversion yields 4
+// inventory cards instead of 41.
+const ASSET_PATH = path.resolve(__dirname, '..', 'test-data', process.env.ASSET_FILE || 'artists&illustrators_20260508.pdf');
 
 function daysFromNow(days: number): Date {
     const d = new Date();
@@ -34,7 +37,8 @@ test('Existing magazine flow: login -> create job -> verify in production', asyn
     const createJobPage = new CreateJobPage(page);
 
     const timestamp = Date.now();
-    const issueName = `Automation_Issue_${timestamp}`;
+    // ISSUE_NAME lets a runner script know the job's name up front.
+    const issueName = process.env.ISSUE_NAME || `Automation_Issue_${timestamp}`;
     let magazineName = '';
 
     await test.step('Log in as established client', async () => {

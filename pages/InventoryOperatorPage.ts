@@ -21,15 +21,22 @@ export class InventoryOperatorPage {
         return this.page.getByRole('row').filter({ has: this.page.getByRole('cell') });
     }
 
+    // Confirmed live: after client feedback (Draft 2) the name cell is
+    // prefixed with a "New Feedback" badge (span.highlight_feedback).
     row(articleName: string): Locator {
+        const escaped = articleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         return this.rows().filter({
-            has: this.page.getByRole('cell', { name: articleName, exact: true }),
+            has: this.page.locator('td:nth-child(2)', { hasText: new RegExp(`^\\s*(New Feedback\\s*)?${escaped}\\s*$`) }),
         }).first();
     }
 
     async articleNames(): Promise<string[]> {
         await this.page.getByRole('cell').first().waitFor({ state: 'visible', timeout: 30000 });
-        return (await this.rows().locator('td:nth-child(2)').allTextContents()).map(t => t.trim());
+        return this.rows().locator('td:nth-child(2)').evaluateAll(cells => cells.map(cell => {
+            const copy = cell.cloneNode(true) as HTMLElement;
+            copy.querySelectorAll('.highlight_feedback').forEach(badge => badge.remove());
+            return (copy.textContent ?? '').trim();
+        }));
     }
 
     async status(row: Locator): Promise<string> {
@@ -99,7 +106,18 @@ export class InventoryOperatorPage {
         await this.page.route(articleFilesRoute, async route => {
             if (uploadStatuses.length === 0) return route.continue();
             for (let attempt = 1; attempt <= 10; attempt++) {
-                const response = await route.fetch();
+                // Confirmed live: route.fetch (sent from Node, not the
+                // browser) intermittently hits connect ETIMEDOUT on UAT —
+                // retry, and finally let the browser's own request through.
+                let response: import('@playwright/test').APIResponse;
+                try {
+                    response = await route.fetch({ timeout: 30000 });
+                } catch (e) {
+                    console.log(`   ${label} | GET article-files refetch failed (try ${attempt}): ${(e as Error).message.split('\n')[0]}`);
+                    if (attempt === 10) return route.continue();
+                    await new Promise(r => setTimeout(r, 3000));
+                    continue;
+                }
                 const body = (await response.text()).trim();
                 if ((body && body !== '[]') || attempt === 10) {
                     console.log(`   ${label} | GET article-files after upload (try ${attempt}) -> ${body.slice(0, 120)}`);

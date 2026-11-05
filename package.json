@@ -22,7 +22,9 @@
     "test:uat:backend-qc": "cross-env TEST_ENV=uat playwright test tests/backend-qc.spec.ts --headed",
     "test:uat:backend-qa": "cross-env TEST_ENV=uat playwright test tests/backend-qa.spec.ts --headed",
     "test:uat:backend-to-proof": "cross-env TEST_ENV=uat playwright test tests/backend-to-proof.spec.ts --headed",
-    "test:uat:full-run": "node scripts/full-run.js"
+    "test:uat:full-run": "node scripts/full-run.js",
+    "test:uat:backend-start-automatic": "cross-env TEST_ENV=uat playwright test tests/backend-start-automatic.spec.ts --headed",
+    "test:uat:dual-run": "node scripts/dual-run.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

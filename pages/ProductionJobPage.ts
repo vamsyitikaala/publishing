@@ -11,10 +11,26 @@ export class ProductionJobPage {
     // Confirmed live: clicking the icon without first scrolling it into
     // view intermittently fails to navigate at all (click registers but no
     // navigation follows) — scroll explicitly before clicking.
-    async viewFirstJob(): Promise<{ issueName: string; magazineName: string }> {
+    // JOB_ISSUE=<issue name> targets that job instead of the newest one, so
+    // two jobs can be in flight at once (manual + automatic inventory).
+    async viewFirstJob(issueName = process.env.JOB_ISSUE): Promise<{ issueName: string; magazineName: string }> {
+        await this.clearJobSearch();
+        await this.page.waitForLoadState('networkidle').catch(() => {});
+        // Confirmed live: the table can re-render right after it first shows
+        // (job list refresh), detaching the row just found — look it up again.
         const viewIcons = this.page.locator('img[alt="View Job"]');
-        await viewIcons.first().scrollIntoViewIfNeeded();
-        await viewIcons.first().click({ timeout: 15000 });
+        for (let attempt = 1; ; attempt++) {
+            try {
+                const viewIcon = issueName ? viewIcons.nth(await this.jobRowIndex(issueName)) : viewIcons.first();
+                await viewIcon.scrollIntoViewIfNeeded({ timeout: 10000 });
+                await viewIcon.click({ timeout: 15000 });
+                break;
+            } catch (e) {
+                if (attempt >= 3) throw e;
+                console.log(`   View Job attempt ${attempt} failed (${(e as Error).message.split('\n')[0]}) — retrying`);
+                await this.page.waitForTimeout(2000);
+            }
+        }
 
         // Confirmed live: a job without inventory opens /dashboard/viewBrief;
         // once it has inventory, View opens a different Issue Summary layout
@@ -28,10 +44,43 @@ export class ProductionJobPage {
         const issueSummaryText = (await issueHeading.textContent()) ?? '';
         const magazineText = (await this.page.getByText(/MAGAZINE\s*[-–]/).first().textContent()) ?? '';
 
-        return {
+        const job = {
             issueName: issueSummaryText.replace(/.*ISSUE SUMMARY\s*-\s*/i, '').trim(),
             magazineName: magazineText.replace(/.*MAGAZINE\s*[-–]\s*/i, '').trim(),
         };
+        if (issueName) expect(job.issueName, 'opened the wrong job').toBe(issueName);
+        return job;
+    }
+
+    // Confirmed live: the dashboard truncates issue names
+    // ("Automation_Issue_179..."), and its Search box doesn't narrow the
+    // list (the API ignores the term) — but each issue cell's tooltip
+    // registers the full name in a hidden aria-describedby message.
+    // Searches the first page (newest 20 jobs).
+    private async jobRowIndex(issueName: string): Promise<number> {
+        const cells = this.page.locator('td.mat-column-issue_name span.short-title');
+        await cells.first().waitFor({ state: 'visible', timeout: 30000 });
+        const count = await cells.count();
+        for (let i = 0; i < count; i++) {
+            const id = await cells.nth(i).getAttribute('aria-describedby');
+            const name = id ? await this.page.locator(`[id="${id}"]`).textContent() : await cells.nth(i).textContent();
+            if (name?.trim() === issueName) return i;
+        }
+        throw new Error(`Job "${issueName}" is not among the newest ${count} jobs on the Job Dashboard`);
+    }
+
+    // Confirmed live: a search term is kept (per user, across sessions) as
+    // a "<term> x" chip beside the box, and the box stays disabled until the
+    // chip is clicked away — left in place it would also hide the newest job.
+    private async clearJobSearch() {
+        await this.page.locator('img[alt="View Job"]').first().waitFor({ state: 'visible', timeout: 30000 });
+        const search = this.page.getByRole('textbox', { name: 'Search' });
+        const chipClose = this.page.locator('.search_key .close_key');
+        while (await chipClose.count() > 0) {
+            await chipClose.first().click({ timeout: 15000 });
+        }
+        await expect(search).toBeEnabled({ timeout: 15000 });
+        await this.page.locator('img[alt="View Job"]').first().waitFor({ state: 'visible', timeout: 30000 });
     }
 
     async goToJobDashboard() {
@@ -49,12 +98,21 @@ export class ProductionJobPage {
         await bar.getByRole('textbox').fill(link, { timeout: 15000 });
         const toProof = bar.getByRole('button', { name: 'To Proof' });
         await expect(toProof).toBeEnabled({ timeout: 15000 });
+        // The status change happens in POST .../client-to-proof, which can
+        // take a while on UAT — wait for it explicitly, otherwise a reload
+        // right after aborts it mid-flight and nothing moves to Proofing.
+        const toProofResponse = this.page.waitForResponse(
+            r => r.request().method() === 'POST' && /\/client-to-proof/.test(r.url()),
+            { timeout: 180000 },
+        );
         await toProof.click({ timeout: 15000 });
         const confirm = this.page.getByRole('dialog').getByRole('button', { name: /^(yes|confirm|ok|proceed)$/i }).first();
         if (await confirm.isVisible({ timeout: 3000 }).catch(() => false)) {
             await confirm.click({ timeout: 15000 });
         }
-        await this.page.waitForLoadState('networkidle').catch(() => {});
+        const response = await toProofResponse;
+        console.log(`   client-to-proof -> HTTP ${response.status()}: ${(await response.text().catch(() => '')).slice(0, 200)}`);
+        expect(response.ok(), `client-to-proof returned HTTP ${response.status()}`).toBeTruthy();
     }
 
     // Issue Summary with inventory: "INVENTORY DRAFT <n>" heading over a
@@ -85,6 +143,18 @@ export class ProductionJobPage {
         }
     }
 
+    // Automatic inventory names come from OCR and its page-range format
+    // isn't confirmed on the listing yet — check the article names only.
+    async verifyArticlesListed(articleNames: string[]) {
+        await this.page.getByText(/^\s*INVENTORY DRAFT/).first().waitFor({ state: 'visible', timeout: 30000 });
+        for (const name of articleNames) {
+            await expect(this.page.getByRole('row').filter({
+                has: this.page.getByRole('cell', { name, exact: true }),
+            }).first()).toBeVisible({ timeout: 15000 });
+            console.log(`   ✅ Listed: ${name}`);
+        }
+    }
+
     // Issue Summary -> INVENTORY card -> "+ Create Inventory" opens a small
     // list of two listitems: "Automatic" (with a status note underneath —
     // "Click to Start" on a fresh job, "* Completed" once run) and "Manual".
@@ -107,11 +177,19 @@ export class ProductionJobPage {
     // Confirmed live: clicking the "Automatic" listitem itself only closes
     // the menu (no request fires, "No Inventory" stays) — the start action
     // sits on the inner "Click to Start" element.
+    // The start is a POST to the AI service (uat-ai.vmgpremedia.com) — a
+    // reload right after the click aborts it and nothing starts, so wait for
+    // its response (the conversion itself carries on server-side after).
     async chooseAutomaticInventory(): Promise<string> {
         const item = this.automaticItem();
         const html = await item.evaluate(el => el.outerHTML);
+        const isStart = (r: { url(): string; method(): string }) => r.method() === 'POST' && /ai\.vmgpremedia\.com/.test(r.url());
+        const sent = this.page.waitForRequest(isStart, { timeout: 15000 });
+        const answered = this.page.waitForResponse(isStart, { timeout: 60000 });
         await item.getByText('Click to Start', { exact: false }).click({ timeout: 15000 });
-        await this.page.waitForLoadState('networkidle').catch(() => {});
+        await sent;
+        const response = await answered.catch(() => null);
+        console.log(`   Automatic start -> ${response ? `HTTP ${response.status()}: ${(await response.text().catch(() => '')).slice(0, 200)}` : 'no response within 60s (request still in flight)'}`);
         return html;
     }
 
@@ -120,6 +198,53 @@ export class ProductionJobPage {
     async automaticStatus(): Promise<string> {
         const text = (await this.automaticItem().textContent()) ?? '';
         return text.replace(/^\s*Automatic/, '').replace(/[*\s]+/g, ' ').trim();
+    }
+
+    // Confirmed live: after "Click to Start" the note reads "* In Progress"
+    // for ~4-7 min, then "* Completed" — which means the conversion is ready
+    // for inventory creation. It only updates on reload, so poll.
+    async waitForAutomaticCompleted(timeoutMs = 15 * 60 * 1000): Promise<string> {
+        const deadline = Date.now() + timeoutMs;
+        let status = await this.automaticStatus();
+        while (!/completed/i.test(status)) {
+            if (Date.now() > deadline) throw new Error(`Automatic inventory still "${status}" after ${timeoutMs / 60000} min`);
+            await this.page.waitForTimeout(30000);
+            await this.page.reload();
+            await this.reloadIssueSummary();
+            await this.openCreateInventoryMenu();
+            status = await this.automaticStatus();
+            console.log(`   Automatic status: ${status}`);
+        }
+        return status;
+    }
+
+    private async reloadIssueSummary() {
+        await this.page.reload();
+        await this.page.getByText(/ISSUE SUMMARY\s*-/).first().waitFor({ state: 'visible', timeout: 30000 });
+        await this.page.waitForLoadState('networkidle').catch(() => {});
+    }
+
+    // Confirmed live: clicking "* Completed" under Automatic opens
+    // /dashboard/createinventory pre-filled with the converted articles —
+    // but a click before the Issue Summary has finished loading is ignored,
+    // so retry once on a settled page. The form then fetches the job's
+    // details (GET .../get/<id>/job); a Submit before that lands throws in
+    // the app ("reading 'inventory_creation_type'") and hangs on Loading.
+    async openCompletedAutomaticInventory() {
+        for (let attempt = 1; ; attempt++) {
+            const jobDetails = this.page.waitForResponse(r => /\/api\/production\/get\/\d+\/job\?/.test(r.url()), { timeout: 30000 });
+            await this.automaticItem().getByText(/Completed/).click({ timeout: 15000 });
+            const opened = await this.page.waitForURL(/createinventory/, { timeout: 15000 }).then(() => true, () => false);
+            if (opened) {
+                await jobDetails;
+                return;
+            }
+            jobDetails.catch(() => {});
+            if (attempt === 2) throw new Error('Clicking Automatic "Completed" did not open the inventory form');
+            console.log('   Automatic "Completed" click ignored — reloading and retrying');
+            await this.reloadIssueSummary();
+            await this.openCreateInventoryMenu();
+        }
     }
 
     // Manual opens the "Inventory Log" form (sections Cover page Count /

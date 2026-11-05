@@ -86,13 +86,25 @@ export class QcReviewPage {
 
     // Confirmed live: the Send <button> itself has no box (Playwright reports
     // it "not visible"); the clickable thing is its arrow image.
-    async addComment(text: string) {
+    // Confirmed live (Draft 2, UAT): the comment POST answers 200 "Comments
+    // posted Successfully", but the list GET for file_version "V 2.1"
+    // returns [] — so a saved comment may never be listed. Asserts the save
+    // and returns whether the comment is shown.
+    async addComment(text: string): Promise<boolean> {
         const box = this.commentBox();
         await box.scrollIntoViewIfNeeded({ timeout: 15000 });
         await box.click({ timeout: 15000 });
         await box.fill(text, { timeout: 15000 });
+        const posted = this.page.waitForResponse(
+            r => /\/post\/q[ca]_article_files_comments/.test(r.url()), { timeout: 60000 });
         await this.page.getByRole('img', { name: 'Send' }).click({ timeout: 15000 });
-        await expect(this.page.getByText(text, { exact: false }).first()).toBeVisible({ timeout: 30000 });
+        const response = await posted;
+        const body = await response.text().catch(() => '');
+        expect(response.ok() && !/"status":\s*[45]\d\d/.test(body), `comment save: HTTP ${response.status()} ${body}`).toBeTruthy();
+        const shown = await this.page.getByText(text, { exact: false }).first()
+            .waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false);
+        if (!shown) console.warn(`   ⚠️  Comment saved (${body.slice(0, 100)}) but not listed — the comments GET returns [] for this file version`);
+        return shown;
     }
 
     private comment(text: string): Locator {

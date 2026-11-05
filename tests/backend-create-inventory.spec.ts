@@ -3,12 +3,12 @@ import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { CreateInventoryPage, InventoryEntry } from '../pages/CreateInventoryPage';
 
-// Backend only: open the newest job already on the Job Dashboard and build
-// its inventory via Create Inventory, then confirm it is listed in the
-// job's INVENTORY DRAFT table.
+// Backend only: open the newest job (or JOB_ISSUE) on the Job Dashboard and
+// build its inventory via Create Inventory, then confirm it is listed in
+// the job's INVENTORY DRAFT table.
 //   - Job already has inventory  -> just verify/list it (no duplicate).
 //   - Otherwise                  -> create the inventory Manually
-//     (INVENTORY_MODE=automatic: start Automatic on a fresh job instead).
+//     (INVENTORY_MODE=automatic: from the Automatic conversion instead).
 // Pairs with existing-magazine-flow.spec.ts, which creates the newest job.
 const BACKEND_CREDENTIAL_CANDIDATES = [
     { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
@@ -24,7 +24,8 @@ const MANUAL_ENTRIES: InventoryEntry[] = [
 ];
 
 test('Backend: newest job -> Create Inventory', async ({ page }) => {
-    test.setTimeout(5 * 60 * 1000);
+    // Automatic mode may wait out the conversion (up to 15 min).
+    test.setTimeout((process.env.INVENTORY_MODE === 'automatic' ? 20 : 5) * 60 * 1000);
 
     const backendLogin = new BackendLoginPage(page);
     const productionJob = new ProductionJobPage(page);
@@ -55,12 +56,39 @@ test('Backend: newest job -> Create Inventory', async ({ page }) => {
         console.log('Automatic status:', status);
     });
 
-    // Manual by default: on UAT, Automatic "Completed" without creating any
-    // inventory. INVENTORY_MODE=automatic starts Automatic instead.
-    if (process.env.INVENTORY_MODE === 'automatic' && /click to start/i.test(status)) {
-        await test.step('Start Automatic inventory', async () => {
-            await productionJob.chooseAutomaticInventory();
-            console.log('✅ Automatic inventory started');
+    // INVENTORY_MODE=automatic: start the conversion if needed (normally
+    // backend-start-automatic.spec.ts already did, minutes earlier), wait
+    // for "Completed", then submit the pre-filled form as converted.
+    // Confirmed live: dropping cards before Submit still answers HTTP 200
+    // but no inventory is ever created (and Automatic can't be redone on
+    // that job) — so keep the job small via a short PDF instead.
+    // AUTO_KEEP=<n> trims anyway, for investigating that.
+    if (process.env.INVENTORY_MODE === 'automatic') {
+        await test.step(`Automatic is "${status}" -> wait for Completed`, async () => {
+            if (/click to start/i.test(status)) {
+                await productionJob.chooseAutomaticInventory();
+                console.log('✅ Automatic inventory started');
+                await page.reload();
+                await productionJob.openCreateInventoryMenu();
+            }
+            console.log('✅ Automatic status:', await productionJob.waitForAutomaticCompleted());
+        });
+
+        let kept: { articleName: string; pageCount: string; pageRange: string }[] = [];
+        await test.step('Create inventory from the Automatic result', async () => {
+            await productionJob.openCompletedAutomaticInventory();
+            kept = await new CreateInventoryPage(page).submitAutomaticInventory(Number(process.env.AUTO_KEEP || Infinity));
+            console.log('✅ Inventory submitted');
+        });
+
+        await test.step('Verify the inventory is listed on the job (INVENTORY DRAFT)', async () => {
+            await productionJob.goToJobDashboard();
+            await productionJob.viewFirstJob();
+            const rows = await productionJob.inventoryRows();
+            console.log(`Inventory (${rows.length} rows):\n  ` + rows.join('\n  '));
+            await productionJob.verifyArticlesListed(kept.map(k => k.articleName));
+            await page.screenshot({ path: `screenshots/inventory-listed-${timestamp}.png`, fullPage: true });
+            console.log('✅ Automatic inventory created and listed on the job');
         });
         return;
     }

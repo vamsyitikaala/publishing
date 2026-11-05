@@ -56,7 +56,8 @@ test('Backend operator: checkout -> upload -> Ready for QC, one spec at a time',
             const row = operator.row(name);
             const status = await operator.status(row);
 
-            if (/get started/i.test(status)) {
+            // "Rework": Draft 2 after client feedback — same Assign checkout.
+            if (/get started|rework/i.test(status)) {
                 await operator.assignToMe(row, label);
             } else if (!/operator work in progress/i.test(status)) {
                 console.log(`   ${label} | Already past operator stage ("${status}") — skipping`);
@@ -67,7 +68,10 @@ test('Backend operator: checkout -> upload -> Ready for QC, one spec at a time',
 
             requests.length = 0;
             try {
-                const uniqueName = `${name.toLowerCase().replace(/\s+/g, '-')}-${ts}`;
+                // Automatic inventory names are raw OCR text ("... RT)") —
+                // keep the upload's file name to [a-z0-9-].
+                const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+                const uniqueName = `${slug || 'spec'}-${ts}`;
                 await operator.uploadAndReadyForQc(row, label, SAMPLE_FILE, uniqueName);
             } finally {
                 console.log(`   ${label} | Requests during upload:\n      ` + requests.join('\n      '));

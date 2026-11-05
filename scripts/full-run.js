@@ -1,12 +1,16 @@
-// Full publishing run on UAT, client job creation through to Proofing.
-// Runs each stage's spec in order against the newest job (the one the
-// first stage creates) and stops at the first failing stage. Every stage
+// Full publishing run on UAT, client job creation through Proofing to
+// the client approving it.
+// Runs each stage's spec in order against the job the first stage
+// creates (ISSUE_NAME / JOB_ISSUE) and stops at the first failing stage. Every stage
 // records a Playwright trace (test-results/) for post-mortem.
 //
 //   node scripts/full-run.js            (headed)
 //   HEADLESS=1 node scripts/full-run.js
-//   FROM_STAGE=3 node scripts/full-run.js   (resume on the newest job)
+//   FROM_STAGE=3 ISSUE_NAME=<job> node scripts/full-run.js   (resume)
 const { spawnSync } = require('child_process');
+
+// Named up front so every stage (including the client one) targets this job.
+const ISSUE_NAME = process.env.ISSUE_NAME || `Automation_Issue_${Date.now()}`;
 
 const STAGES = [
     ['Client: login -> create job -> backend check', 'tests/existing-magazine-flow.spec.ts'],
@@ -15,8 +19,10 @@ const STAGES = [
     ['QC: errors + comments -> approve', 'tests/backend-qc.spec.ts'],
     ['QA: errors + comments -> approve', 'tests/backend-qa.spec.ts'],
     ['Bundled link -> To Proof', 'tests/backend-to-proof.spec.ts'],
+    ['Client: review -> Approve', 'tests/client-approve.spec.ts'],
 ];
 
+console.log(`Job: ${ISSUE_NAME}`);
 const started = Date.now();
 const fromStage = Number(process.env.FROM_STAGE || 1);
 for (const [i, [name, spec]] of STAGES.entries()) {
@@ -27,10 +33,11 @@ for (const [i, [name, spec]] of STAGES.entries()) {
     const result = spawnSync('npx', args, {
         stdio: 'inherit',
         shell: true,
-        env: { ...process.env, TEST_ENV: process.env.TEST_ENV || 'uat' },
+        env: { ...process.env, TEST_ENV: process.env.TEST_ENV || 'uat', ISSUE_NAME, JOB_ISSUE: ISSUE_NAME },
     });
     if (result.status !== 0) {
         console.log(`\n❌ Full run stopped at stage ${i + 1}: ${name}`);
+        console.log(`   Resume: FROM_STAGE=${i + 1} ISSUE_NAME=${ISSUE_NAME} node scripts/full-run.js`);
         process.exit(result.status || 1);
     }
 }

@@ -56,6 +56,116 @@ export class InventoryOperatorPage {
         }).first().click({ timeout: 15000 });
     }
 
+    // "Time Log" (clock icon beside the checkout action) — confirmed live:
+    //   - the icon opens a dropdown of the spec's assignees (empty until the
+    //     spec has one); picking one opens the time-log dialog: Draft
+    //     combobox, a "Start" timer button, manual Start/End entry and the
+    //     spec's existing logs;
+    //   - Start posts time-logger/save ("Timers created successfully"),
+    //     closes the dialog and shows a running timer banner
+    //     (fbportal-timer) with a stop icon; while it runs the row's
+    //     checkout is disabled ("Please End the Time Log");
+    //   - stop posts time-logger/update with total_hours and the row's Time
+    //     Spent picks it up.
+    // The banner only exists in the session that started the timer, so the
+    // timer is always stopped here before moving on.
+    // Returns 'no-assignee' when the spec has no assignee yet, and
+    // 'unavailable' when the assignee list itself keeps failing — confirmed
+    // live on UAT Draft 2: time-logger/get/assignee-list intermittently
+    // answers HTTP 503 (no CORS header, so the dropdown just stays empty)
+    // for some specs. Neither blocks the checkout; callers decide.
+    async logTime(row: Locator, label: string, user: string, seconds = 12): Promise<'logged' | 'no-assignee' | 'unavailable'> {
+        const assignees = row.locator('.dropdown-content-view');
+        const entry = assignees.getByText(user, { exact: true });
+        // Confirmed live: the list panel (.dropdown-content, with a Search
+        // box) only opens once the assignee list has loaded, and then lays a
+        // full-screen transparent backdrop (its first <span>) over the page
+        // that swallows other clicks — click that backdrop to close it.
+        const panel = row.locator('.dropdown-content');
+        const closeDropdown = async () => {
+            if (!await panel.isVisible()) return;
+            await panel.locator('> span').first().click({ force: true });
+            await expect(panel).toBeHidden({ timeout: 10000 });
+        };
+        let failure = '';
+        for (let attempt = 1; ; attempt++) {
+            const list = this.page.waitForResponse(r => /time-logger\/get\/assignee-list/.test(r.url()), { timeout: 30000 }).catch(() => null);
+            await this.clickAction(row, 'Time Log');
+            const response = await list;
+            if (await entry.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) break;
+            await closeDropdown();
+            if (response?.ok()) return 'no-assignee';
+            failure = response ? `HTTP ${response.status()}` : 'no response';
+            if (attempt === 3) {
+                console.warn(`   ⚠️  ${label} | Time Log skipped — assignee list failed 3 times (${failure})`);
+                return 'unavailable';
+            }
+            await this.page.waitForTimeout(5000);
+        }
+        await entry.click({ timeout: 15000 });
+
+        const dialog = this.page.getByRole('dialog');
+        await dialog.getByRole('button', { name: 'Start' }).waitFor({ state: 'visible', timeout: 30000 });
+        await this.page.waitForLoadState('networkidle').catch(() => {});
+        await this.closeDanglingTimeLog(dialog, label);
+        const draft = await this.pickLatestDraft(dialog);
+
+        const started = this.page.waitForResponse(r => /time-logger\/save/.test(r.url()), { timeout: 60000 });
+        await dialog.getByRole('button', { name: 'Start' }).click({ timeout: 15000 });
+        const startRes = await started;
+        expect(startRes.ok(), `time-logger/save: ${await startRes.text().catch(() => '')}`).toBeTruthy();
+        const stop = this.page.locator('fbportal-timer img[src*="stop"]');
+        await stop.waitFor({ state: 'visible', timeout: 30000 });
+
+        await this.page.waitForTimeout(seconds * 1000);
+
+        const stopped = this.page.waitForResponse(r => /time-logger\/update/.test(r.url()), { timeout: 60000 });
+        await stop.click({ timeout: 15000 });
+        const stopRes = await stopped;
+        const total = /"total_hours":"([^"]*)"/.exec(stopRes.request().postData() ?? '')?.[1];
+        expect(stopRes.ok(), `time-logger/update: ${await stopRes.text().catch(() => '')}`).toBeTruthy();
+        await expect(stop).toBeHidden({ timeout: 15000 });
+        await expect(row).not.toContainText('Please End the Time Log', { timeout: 30000 });
+        console.log(`   ${label} | Time Log: ${draft} timer ran ${total}`);
+        return 'logged';
+    }
+
+    // Latest draft in the time-log dialog (Draft 2 after client feedback).
+    private async pickLatestDraft(dialog: Locator): Promise<string> {
+        await dialog.getByRole('combobox', { name: 'Draft' }).click({ timeout: 15000 });
+        const drafts = this.page.getByRole('option');
+        await drafts.first().waitFor({ state: 'visible', timeout: 15000 });
+        const draft = (await drafts.last().innerText()).trim();
+        await drafts.last().click();
+        return draft;
+    }
+
+    // A timer started but never stopped (e.g. a run that died mid-timer)
+    // stays open server-side, and the row's checkout stays disabled ("Please
+    // End the Time Log"); its banner is gone with that session. Confirmed
+    // live: the open log is listed in the dialog with no End Time — its edit
+    // icon loads it into the form; an End Time + Draft + "Log time" closes
+    // it ("Success! Your time has been logged.").
+    private async closeDanglingTimeLog(dialog: Locator, label: string) {
+        const open = dialog.locator('div.row.body')
+            .filter({ has: this.page.locator('img[src*="logedit"]') })
+            .filter({ has: this.page.locator('xpath=./div[3][normalize-space()=""]') });
+        while (await open.count() > 0) {
+            await open.first().locator('img[src*="logedit"]').click({ timeout: 15000 });
+            const end = new Date(Date.now() + 60000);
+            await dialog.getByRole('textbox', { name: 'End hour' }).fill(String(((end.getHours() + 11) % 12) + 1).padStart(2, '0'));
+            await dialog.getByRole('textbox', { name: 'End minute' }).fill(String(end.getMinutes()).padStart(2, '0'));
+            await dialog.getByRole('group', { name: 'End AM or PM' })
+                .getByRole('button', { name: end.getHours() < 12 ? 'AM' : 'PM' }).click();
+            await this.pickLatestDraft(dialog);
+            const before = await open.count();
+            await dialog.getByRole('button', { name: 'Log time' }).click({ timeout: 15000 });
+            await expect(this.page.getByText('Your time has been logged', { exact: false }).first()).toBeVisible({ timeout: 30000 });
+            await expect(open).toHaveCount(before - 1, { timeout: 30000 });
+            console.warn(`   ⚠️  ${label} | Closed a time log left running by an earlier attempt`);
+        }
+    }
+
     // Operator checkout.
     async assignToMe(row: Locator, label: string) {
         const before = await this.status(row);

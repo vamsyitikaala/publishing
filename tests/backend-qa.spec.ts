@@ -3,6 +3,7 @@ import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { InventoryOperatorPage } from '../pages/InventoryOperatorPage';
 import { QcReviewPage } from '../pages/QcReviewPage';
+import { backendCredentials } from '../config/credentials';
 
 // QA stage on the newest job's inventory — same pattern as QC, strictly one
 // spec at a time: Check Out (or View QA if already checked out) -> review
@@ -10,10 +11,7 @@ import { QcReviewPage } from '../pages/QcReviewPage';
 // Bundling", then the next spec. Only specs QC sent to QA ("QC Completed" /
 // "Ready for QA" / "QA Work In Progress") are handled. Pairs with
 // backend-qc.spec.ts.
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 test('Backend QA: error counts + comments (delete one) -> Approve -> Ready For Bundling, one spec at a time', async ({ page }) => {
     test.setTimeout(20 * 60 * 1000);
@@ -24,7 +22,7 @@ test('Backend QA: error counts + comments (delete one) -> Approve -> Ready For B
     const review = new QcReviewPage(page);
     const ts = Date.now();
 
-    await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES);
+    const user = (await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES)).username;
     console.log('✅ Opened job:', await productionJob.viewFirstJob());
     const names = await inventory.articleNames();
 
@@ -43,7 +41,9 @@ test('Backend QA: error counts + comments (delete one) -> Approve -> Ready For B
             console.log(`   ${label} | "${status}" | actions: ${actions.join(', ')}`);
 
             if (!/qa work in progress/i.test(status)) {
-                await inventory.clickAction(row, 'Check Out');
+                // Time Log (beside Check Out) at least 10s, then Check Out.
+                expect(await inventory.logTime(row, label, user), `${label}: Time Log before Check Out`).not.toBe('no-assignee');
+                await inventory.clickAction(inventory.row(name), 'Check Out');
             }
             // As in QC: Check Out can just assign and stay on the page; the
             // same action button then opens the review view.

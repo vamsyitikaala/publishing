@@ -60,19 +60,38 @@ const STEPS = [
     ...proofChain('Job A Draft 2', AUTO_ISSUE),
 ];
 
+// UAT intermittently drops requests (login, uploads, the Automatic start).
+// Every backend/feedback spec resumes where it stopped (finished specs are
+// skipped), so a failed step is simply rerun — up to STEP_RETRIES more
+// times. Creating a job and the client Approve are not repeatable (a rerun
+// would make a duplicate job / find the job already approved), so those
+// stop the run straight away.
+const STEP_RETRIES = Number(process.env.STEP_RETRIES ?? 2);
+const NOT_REPEATABLE = /existing-magazine-flow|client-approve/;
+
 console.log(`Job A (automatic): ${AUTO_ISSUE}\nJob B (manual):    ${MANUAL_ISSUE}`);
 const started = Date.now();
 const fromStep = Number(process.env.FROM_STEP || 1);
+const retried = [];
 for (const [i, [name, spec, extraEnv]] of STEPS.entries()) {
     if (i + 1 < fromStep) continue;
-    console.log(`\n=== Step ${i + 1}/${STEPS.length}: ${name} (${spec}) ===`);
-    const args = ['playwright', 'test', spec, '--trace=on', '--output', `test-results/dual-run-step-${i + 1}`];
-    if (!process.env.HEADLESS) args.push('--headed');
-    const result = spawnSync('npx', args, {
-        stdio: 'inherit',
-        shell: true,
-        env: { ...process.env, TEST_ENV: process.env.TEST_ENV || 'uat', ...extraEnv },
-    });
+    const attempts = NOT_REPEATABLE.test(spec) ? 1 : 1 + STEP_RETRIES;
+    let result;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        console.log(`\n=== Step ${i + 1}/${STEPS.length}: ${name} (${spec})${attempt > 1 ? ` — retry ${attempt - 1}/${STEP_RETRIES}` : ''} ===`);
+        const out = `test-results/dual-run-step-${i + 1}${attempt > 1 ? `-retry${attempt - 1}` : ''}`;
+        const args = ['playwright', 'test', spec, '--trace=on', '--output', out];
+        if (!process.env.HEADLESS) args.push('--headed');
+        result = spawnSync('npx', args, {
+            stdio: 'inherit',
+            shell: true,
+            env: { ...process.env, TEST_ENV: process.env.TEST_ENV || 'uat', ...extraEnv },
+        });
+        if (result.status === 0) {
+            if (attempt > 1) retried.push(`step ${i + 1} (${name}) passed on retry ${attempt - 1}`);
+            break;
+        }
+    }
     if (result.status !== 0) {
         console.log(`\n❌ Dual run stopped at step ${i + 1}: ${name}`);
         console.log(`   Resume: ${ONLY_AUTO ? 'ONLY_AUTO=1 ' : ''}FROM_STEP=${i + 1} AUTO_ISSUE=${AUTO_ISSUE} MANUAL_ISSUE=${MANUAL_ISSUE} node scripts/dual-run.js`);
@@ -81,3 +100,4 @@ for (const [i, [name, spec, extraEnv]] of STEPS.entries()) {
 }
 console.log(`\n✅ Dual run completed — all ${STEPS.length} steps passed in ${Math.round((Date.now() - started) / 60000)} min`);
 console.log(`   Job A (automatic): ${AUTO_ISSUE}\n   Job B (manual):    ${MANUAL_ISSUE}`);
+if (retried.length) console.log('   Retried:\n     ' + retried.join('\n     '));

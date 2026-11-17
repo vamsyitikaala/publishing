@@ -3,16 +3,14 @@ import * as path from 'path';
 import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { InventoryOperatorPage } from '../pages/InventoryOperatorPage';
+import { backendCredentials } from '../config/credentials';
 
 // Operator stage on the newest job's inventory — strictly one spec at a
 // time: checkout (Assign) -> Upload (Drag and Drop -> sample JPEGs) ->
 // Ready for QC, and only then move on to the next spec. Specs already past the
 // operator stage are skipped; one already checked out resumes at Upload.
 // Pairs with backend-create-inventory.spec.ts, which builds the inventory.
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 // One asset per spec — the upload dialog rejects multi-file selections.
 // Must be under 2 MB: UAT answers HTTP 500 ("The website encountered an
@@ -41,8 +39,9 @@ test('Backend operator: checkout -> upload -> Ready for QC, one spec at a time',
     page.on('console', m => { if (m.type() === 'error') requests.push(`console.error: ${m.text().slice(0, 300)}`); });
     page.on('pageerror', e => requests.push(`pageerror: ${e.message.slice(0, 300)}`));
 
+    let user = '';
     await test.step('Backend login + open newest job', async () => {
-        await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES);
+        user = (await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES)).username;
         console.log('✅ Opened job:', await productionJob.viewFirstJob());
     });
 
@@ -58,7 +57,14 @@ test('Backend operator: checkout -> upload -> Ready for QC, one spec at a time',
 
             // "Rework": Draft 2 after client feedback — same Assign checkout.
             if (/get started|rework/i.test(status)) {
+                // Time Log (beside the checkout) at least 10s, then checkout.
+                // A brand-new spec has no assignee to log time for until the
+                // checkout assigns one — log right after it instead.
+                const logged = await operator.logTime(row, label, user);
                 await operator.assignToMe(row, label);
+                if (logged === 'no-assignee') {
+                    expect(await operator.logTime(row, label, user), `${label}: Time Log after checkout`).not.toBe('no-assignee');
+                }
             } else if (!/operator work in progress/i.test(status)) {
                 console.log(`   ${label} | Already past operator stage ("${status}") — skipping`);
                 return;

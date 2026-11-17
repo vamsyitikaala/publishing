@@ -1,15 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { LoginPage } from '../pages/LoginPage';
 import { ClientReviewPage } from '../pages/ClientReviewPage';
+import { clientCredentials } from '../config/credentials';
 
 // Client review after To Proof (automatic job): feedback + error counts on
 // every spec, Submit each, then "Submit Feedback" — sends the job back to
 // production as Draft 2 (specs in "Rework"). JOB_ISSUE names the job.
 // Specs already "Feedback Submitted" are skipped, so a rerun resumes.
-const CLIENT_CREDENTIAL_CANDIDATES = [
-    { username: 'a360.pbtest@gmail.com', password: 'Test@1234' },
-    { username: 'Immediatemedia.publisher@gmail.com', password: 'Immediate@123' },
-];
+const CLIENT_CREDENTIAL_CANDIDATES = clientCredentials();
 
 const COUNTS = { text: 1, style: 1, image: 1, other: 0 };
 

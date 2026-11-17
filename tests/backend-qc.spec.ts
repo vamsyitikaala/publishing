@@ -3,6 +3,7 @@ import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { InventoryOperatorPage } from '../pages/InventoryOperatorPage';
 import { QcReviewPage } from '../pages/QcReviewPage';
+import { backendCredentials } from '../config/credentials';
 
 // QC stage on the newest job's inventory — strictly one spec at a time:
 // Check Out (or View QC if already checked out) -> QC view -> error counts
@@ -10,10 +11,7 @@ import { QcReviewPage } from '../pages/QcReviewPage';
 // specs) or "Ready For Bundling" (the rest), then the next spec. Specs not in
 // QC are skipped. Pairs with backend-operator.spec.ts, which gets every
 // spec to "Ready for QC".
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 test('Backend QC: error counts + comments (delete one) -> Approve, one spec at a time', async ({ page }) => {
     test.setTimeout(20 * 60 * 1000);
@@ -27,7 +25,7 @@ test('Backend QC: error counts + comments (delete one) -> Approve, one spec at a
     page.on('pageerror', e => console.warn(`   ⚠️  Page error: ${e.message.slice(0, 200)}`));
     page.on('console', m => { if (m.type() === 'error') console.warn(`   ⚠️  Console error: ${m.text().slice(0, 200)}`); });
 
-    await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES);
+    const user = (await backendLogin.loginWithFallback(BACKEND_CREDENTIAL_CANDIDATES)).username;
     console.log('✅ Opened job:', await productionJob.viewFirstJob());
     const names = await inventory.articleNames();
 
@@ -44,7 +42,11 @@ test('Backend QC: error counts + comments (delete one) -> Approve, one spec at a
                 return;
             }
 
-            await inventory.clickAction(row, opener);
+            if (opener === 'Check Out') {
+                // Time Log (beside Check Out) at least 10s, then Check Out.
+                expect(await inventory.logTime(row, label, user), `${label}: Time Log before Check Out`).not.toBe('no-assignee');
+            }
+            await inventory.clickAction(inventory.row(name), opener);
             // Confirmed live: Check Out can just assign QC (status -> QC Work
             // In Progress) and stay on the page; the same action button then
             // reads "View QC", which opens the QC view.

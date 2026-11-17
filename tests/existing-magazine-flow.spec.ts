@@ -4,20 +4,15 @@ import { LoginPage } from '../pages/LoginPage';
 import { CreateJobPage } from '../pages/CreateJobPage';
 import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
+import { backendCredentials, clientCredentials } from '../config/credentials';
 
 // Same client -> production chain as full-flow.spec.ts, minus signup and
 // Create Magazine: logs in as an established client and creates the job on
 // that account's most recent magazine. Use this while Create Magazine is
 // blocked on UAT ("Technical Error Uploading the Logo. Code S3.").
-const CLIENT_CREDENTIAL_CANDIDATES = [
-    { username: 'a360.pbtest@gmail.com', password: 'Test@1234' },
-    { username: 'Immediatemedia.publisher@gmail.com', password: 'Immediate@123' },
-];
+const CLIENT_CREDENTIAL_CANDIDATES = clientCredentials();
 
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 // ASSET_FILE (a file in test-data/) overrides the asset — the dual run's
 // automatic job uses a 4-page cut of this PDF so its conversion yields 4

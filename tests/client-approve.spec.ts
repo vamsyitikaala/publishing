@@ -1,14 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { LoginPage } from '../pages/LoginPage';
 import { ClientReviewPage } from '../pages/ClientReviewPage';
+import { clientCredentials } from '../config/credentials';
 
 // Client review after To Proof (manual job): every spec is "To Proof" ->
 // Approve the job. JOB_ISSUE names the job. Pairs with
 // backend-to-proof.spec.ts.
-const CLIENT_CREDENTIAL_CANDIDATES = [
-    { username: 'a360.pbtest@gmail.com', password: 'Test@1234' },
-    { username: 'Immediatemedia.publisher@gmail.com', password: 'Immediate@123' },
-];
+const CLIENT_CREDENTIAL_CANDIDATES = clientCredentials();
 
 test('Client: review the proofed job -> Approve', async ({ page }) => {
     test.setTimeout(6 * 60 * 1000);

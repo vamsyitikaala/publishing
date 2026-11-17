@@ -2,15 +2,13 @@ import { test, expect } from '@playwright/test';
 import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { InventoryOperatorPage } from '../pages/InventoryOperatorPage';
+import { backendCredentials } from '../config/credentials';
 
 // Bundling -> proof on the newest job: once every spec is "Ready for
 // bundling" (after QC/QA), enter the Apple magazine (bundled) link in the
 // bar under the inventory and click "To Proof". Pairs with
 // backend-qa.spec.ts. BUNDLED_LINK overrides the default link.
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 test('Backend: all specs Ready for bundling -> Bundled Link -> To Proof', async ({ page }) => {
     test.setTimeout(5 * 60 * 1000);
@@ -27,6 +25,11 @@ test('Backend: all specs Ready for bundling -> Bundled Link -> To Proof', async 
     const before: string[] = [];
     for (const name of names) before.push(await inventory.status(inventory.row(name)));
     console.log('Statuses before:\n  ' + names.map((n, i) => `${n}: ${before[i]}`).join('\n  '));
+    // A rerun after the To Proof already went through.
+    if (before.every(s => /proofing/i.test(s))) {
+        console.log('✅ Every spec is already in Proofing — nothing to do');
+        return;
+    }
     for (const [i, s] of before.entries()) {
         expect(s, `"${names[i]}" must finish QC/QA before To Proof`).toMatch(/Ready for bundling/i);
     }

@@ -185,12 +185,34 @@ export class ProductionJobPage {
         const html = await item.evaluate(el => el.outerHTML);
         const isStart = (r: { url(): string; method(): string }) => r.method() === 'POST' && /ai\.vmgpremedia\.com/.test(r.url());
         const sent = this.page.waitForRequest(isStart, { timeout: 15000 });
-        const answered = this.page.waitForResponse(isStart, { timeout: 60000 });
+        // Confirmed live: UAT sometimes drops this request (no response,
+        // conversion never starts) — report the failure so callers retry.
+        const outcome = Promise.race([
+            this.page.waitForResponse(isStart, { timeout: 60000 })
+                .then(async r => `HTTP ${r.status()}: ${(await r.text().catch(() => '')).slice(0, 200)}`),
+            this.page.waitForEvent('requestfailed', { predicate: isStart, timeout: 60000 })
+                .then(r => `request failed: ${r.failure()?.errorText}`),
+        ]).catch(e => `no response (${(e as Error).message.split('\n')[0]})`);
         await item.getByText('Click to Start', { exact: false }).click({ timeout: 15000 });
         await sent;
-        const response = await answered.catch(() => null);
-        console.log(`   Automatic start -> ${response ? `HTTP ${response.status()}: ${(await response.text().catch(() => '')).slice(0, 200)}` : 'no response within 60s (request still in flight)'}`);
+        console.log(`   Automatic start -> ${await outcome}`);
         return html;
+    }
+
+    // Start Automatic and confirm it left "Click to Start" (reload + reopen
+    // the menu) — UAT sometimes drops the start request, so retry. Returns
+    // the status afterwards ("In Progress" / "Completed").
+    async startAutomaticInventory(attempts = 3): Promise<string> {
+        let status = await this.automaticStatus();
+        for (let attempt = 1; attempt <= attempts && /click to start/i.test(status); attempt++) {
+            await this.chooseAutomaticInventory();
+            await this.page.reload();
+            await this.openCreateInventoryMenu();
+            status = await this.automaticStatus();
+            console.log(`   Automatic status after start (attempt ${attempt}): ${status}`);
+        }
+        expect(status, 'Automatic should have left "Click to Start"').not.toMatch(/click to start/i);
+        return status;
     }
 
     // Status note under "Automatic": "Click to Start", "* In Progress" or

@@ -2,6 +2,7 @@ import { test } from '@playwright/test';
 import { BackendLoginPage } from '../pages/BackendLoginPage';
 import { ProductionJobPage } from '../pages/ProductionJobPage';
 import { CreateInventoryPage, InventoryEntry } from '../pages/CreateInventoryPage';
+import { backendCredentials } from '../config/credentials';
 
 // Backend only: open the newest job (or JOB_ISSUE) on the Job Dashboard and
 // build its inventory via Create Inventory, then confirm it is listed in
@@ -10,10 +11,7 @@ import { CreateInventoryPage, InventoryEntry } from '../pages/CreateInventoryPag
 //   - Otherwise                  -> create the inventory Manually
 //     (INVENTORY_MODE=automatic: from the Automatic conversion instead).
 // Pairs with existing-magazine-flow.spec.ts, which creates the newest job.
-const BACKEND_CREDENTIAL_CANDIDATES = [
-    { username: 'alluser-uat.pb@vmgdigital.com', password: 'Test@1234' },
-    { username: 'alluser@vmgdigital.com', password: 'Test@1234' },
-];
+const BACKEND_CREDENTIAL_CANDIDATES = backendCredentials();
 
 // Simple fixed split; the test PDF has well over 8 pages.
 const MANUAL_ENTRIES: InventoryEntry[] = [
@@ -66,10 +64,7 @@ test('Backend: newest job -> Create Inventory', async ({ page }) => {
     if (process.env.INVENTORY_MODE === 'automatic') {
         await test.step(`Automatic is "${status}" -> wait for Completed`, async () => {
             if (/click to start/i.test(status)) {
-                await productionJob.chooseAutomaticInventory();
-                console.log('✅ Automatic inventory started');
-                await page.reload();
-                await productionJob.openCreateInventoryMenu();
+                console.log('✅ Automatic inventory started:', await productionJob.startAutomaticInventory());
             }
             console.log('✅ Automatic status:', await productionJob.waitForAutomaticCompleted());
         });
